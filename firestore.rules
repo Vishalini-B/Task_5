@@ -1,0 +1,161 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, format: email)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - monthlyLimit: number (optional)
+    //
+    // Collection: users/{userId}/transactions
+    // Document ID: {transactionId}
+    // Fields:
+    //   - id: string (optional)
+    //   - type: string (required, enum: ['income', 'expense'])
+    //   - amount: number (required, positive)
+    //   - category: string (required)
+    //   - date: string (required, format: ISO 8601)
+    //   - description: string (optional)
+    //   - uid: string (required, immutable)
+    //
+    // Collection: users/{userId}/bills
+    // Document ID: {billId}
+    // Fields:
+    //   - id: string (optional)
+    //   - title: string (required)
+    //   - amount: number (required, positive)
+    //   - dueDate: string (required, format: ISO 8601)
+    //   - isPaid: boolean (required)
+    //   - uid: string (required, immutable)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "vishalinibasu1055@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && (
+        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}$") ||
+        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$")
+      );
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'monthlyLimit', 'notificationSettings', 'role']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() < 500)) &&
+             (!('monthlyLimit' in data) || (data.monthlyLimit is number && data.monthlyLimit >= 0)) &&
+             (!('notificationSettings' in data) || (
+               data.notificationSettings is map &&
+               data.notificationSettings.keys().hasOnly(['billAlerts', 'budgetWarnings', 'largeTransactionAlerts', 'largeTransactionThreshold', 'fcmToken']) &&
+               (!('billAlerts' in data.notificationSettings) || data.notificationSettings.billAlerts is bool) &&
+               (!('budgetWarnings' in data.notificationSettings) || data.notificationSettings.budgetWarnings is bool) &&
+               (!('largeTransactionAlerts' in data.notificationSettings) || data.notificationSettings.largeTransactionAlerts is bool) &&
+               (!('largeTransactionThreshold' in data.notificationSettings) || data.notificationSettings.largeTransactionThreshold is number) &&
+               (!('fcmToken' in data.notificationSettings) || (data.notificationSettings.fcmToken is string && data.notificationSettings.fcmToken.size() < 500))
+             )) &&
+             (!('role' in data) || data.role in ['admin', 'user', 'client']);
+    }
+
+    function isValidTransaction(data) {
+      return hasOnlyAllowedFields(['id', 'type', 'amount', 'category', 'date', 'description', 'details', 'uid']) &&
+             data.type in ['income', 'expense'] &&
+             data.amount is number && data.amount > 0 &&
+             data.category is string && data.category.size() > 0 && data.category.size() < 50 &&
+             isValidDateString(data.date) &&
+             (!('description' in data) || (data.description is string && data.description.size() < 200)) &&
+             (!('details' in data) || (data.details is string && data.details.size() < 1000)) &&
+             data.uid == request.auth.uid;
+    }
+
+    function isValidBill(data) {
+      return hasOnlyAllowedFields(['id', 'title', 'amount', 'dueDate', 'isPaid', 'uid']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 100 &&
+             data.amount is number && data.amount > 0 &&
+             isValidDateString(data.dueDate) &&
+             data.isPaid is bool &&
+             data.uid == request.auth.uid;
+    }
+
+    function isValidNotification(data) {
+      return hasOnlyAllowedFields(['id', 'title', 'message', 'type', 'date', 'isRead', 'uid']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 100 &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 500 &&
+             data.type in ['bill', 'budget', 'streak', 'insight', 'system'] &&
+             isValidDateString(data.date) &&
+             data.isRead is bool &&
+             data.uid == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.get('role', 'client') == 'client' || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && areImmutableFieldsUnchanged(['uid', 'email']) && (request.resource.data.get('role', 'client') == resource.data.get('role', 'client') || isAdmin());
+      allow delete: if isAdmin();
+
+      match /transactions/{transactionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidTransaction(request.resource.data);
+        allow update: if isOwner(userId) && isValidTransaction(request.resource.data) && areImmutableFieldsUnchanged(['uid']);
+        allow delete: if isOwner(userId);
+      }
+
+      match /bills/{billId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidBill(request.resource.data);
+        allow update: if isOwner(userId) && isValidBill(request.resource.data) && areImmutableFieldsUnchanged(['uid']);
+        allow delete: if isOwner(userId);
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidNotification(request.resource.data);
+        allow update: if isOwner(userId) && isValidNotification(request.resource.data) && areImmutableFieldsUnchanged(['uid']);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

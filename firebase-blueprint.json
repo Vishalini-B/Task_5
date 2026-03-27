@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "monthlyLimit": { "type": "number", "description": "Monthly budget limit" },
+        "role": { "type": "string", "enum": ["admin", "user", "client"], "description": "User role" },
+        "notificationSettings": {
+          "type": "object",
+          "properties": {
+            "billAlerts": { "type": "boolean" },
+            "budgetWarnings": { "type": "boolean" },
+            "largeTransactionAlerts": { "type": "boolean" },
+            "largeTransactionThreshold": { "type": "number" },
+            "fcmToken": { "type": "string" }
+          }
+        }
+      },
+      "required": ["uid", "email"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Income or expense record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" },
+        "details": { "type": "string", "description": "Additional transaction details" },
+        "uid": { "type": "string", "description": "Owner UID" }
+      },
+      "required": ["type", "amount", "category", "date", "uid"]
+    },
+    "Bill": {
+      "title": "Bill",
+      "description": "Upcoming bill or reminder",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "isPaid": { "type": "boolean" },
+        "uid": { "type": "string", "description": "Owner UID" }
+      },
+      "required": ["title", "amount", "dueDate", "isPaid", "uid"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["bill", "budget", "streak", "insight", "system"] },
+        "date": { "type": "string", "format": "date-time" },
+        "isRead": { "type": "boolean" },
+        "uid": { "type": "string", "description": "Owner UID" }
+      },
+      "required": ["title", "message", "type", "date", "isRead", "uid"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile and budget"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "User's transactions"
+    },
+    "/users/{userId}/bills/{billId}": {
+      "schema": "Bill",
+      "description": "User's bills"
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User's notifications"
+    }
+  }
+}
